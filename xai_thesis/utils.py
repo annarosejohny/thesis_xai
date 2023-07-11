@@ -1,57 +1,55 @@
-import torch
-from torch import nn
+import torch 
+from torch.utils.data import Dataset
+
+import cv2
+import numpy as np 
+import matplotlib.pyplot as plt 
+
+def plot_heatmap(denorm_image, pred, heatmap):
+
+    fig, (ax1, ax2, ax3) = plt.subplots(figsize=(20,20), ncols=3)
+    for i in range(0, 204):
+        classes = [i]
+        print(classes)
+    # classes = ['cucumber', 'eggplant', 'mushroom']
+    ps = torch.nn.Softmax(dim = 1)(pred).cpu().detach().numpy()
+    ax1.imshow(denorm_image)
+
+    ax2.barh(classes, ps[0])
+    ax2.set_aspect(0.1)
+    ax2.set_yticks(classes)
+    ax2.set_yticklabels(classes)
+    ax2.set_title('Predicted Class')
+    ax2.set_xlim(0, 1.1)
+
+    ax3.imshow(denorm_image)
+    ax3.imshow(heatmap, cmap='magma', alpha=0.7)
 
 
-class Conv_Norm_Act(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, norm_type=nn.BatchNorm2d,
-                 act_type=nn.ReLU):
-        super(Conv_Norm_Act, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding)
-        self.norm = norm_type(out_channels)
-        self.act = act_type()
-        print(f"Conv_Norm_Act in: {in_channels}, out: {out_channels}, act: {act_type}, norm: {norm_type}")
+class ImageDataset(Dataset):
 
-    def forward(self, x):
-        return self.act(self.norm(self.conv(x)))
+    def __init__(self, df, data_dir = None, augs = None,):
+        self.df = df
+        self.augs = augs
+        self.data_dir = data_dir 
 
+    def __len__(self):
+        return len(self.df)
 
-def init_layer_weights(module_list):
-    def init_weights(m):
-        if type(m) == nn.Linear:
-            # torch.nn.init.xavier_uniform_(m.weight)
-            torch.nn.init.kaiming_normal_(m.weight)
-            m.bias.data.fill_(0.0)
+    def __getitem__(self, idx):
 
-    module_list.apply(init_weights)
+        row = self.df.iloc[idx]
 
+        img_path = self.data_dir + row.image_id
+        img = cv2.imread(img_path)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-# Function that freezes all or specific modules in a module list / model
-# e.g. specific_modules = nn.Conv2d, freezing only the nn.Conv2d modules
-def freeze_modules(module_list, freeze=True, specific_modules=None):
-    # Freeze all specific modules in modules
-    if specific_modules:
-        for _, mod in enumerate(module_list.children()):
-            # in case of your own class: Conv_Norm_Act, we just want to influence the Conv2d weights
-            if specific_modules == Conv_Norm_Act:
-                if isinstance(mod, Conv_Norm_Act):
-                    mod.conv.requires_grad = True
-            else:
-                if isinstance(mod, specific_modules):
-                    print(f"Froze {specific_modules} of module: ({mod})")
-                    for param in mod.parameters():
-                        param.requires_grad = not freeze
+        label = row.label 
 
-    # Freeze all modules
-    else:
-        print(f"{'Freezing' if freeze else 'Unfreezing'} model weights")
-        for param in module_list.parameters():
-            try:
-                param.requires_grad = not freeze
-                param.weight.requires_grad = not freeze
-            except:
-                continue
+        if self.augs:
+            data = self.augs(image = img)
+            img = data['image']
 
+        img = torch.from_numpy(img).permute(2, 0, 1)
 
-# Function that unfreezes all or specific modules in a module list / model
-def unfreeze_modules(module_list, unfreeze=True, specific_modules=None):
-    freeze_modules(module_list=module_list, freeze=not unfreeze, specific_modules=specific_modules)
+        return img, label
